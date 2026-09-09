@@ -463,7 +463,7 @@ WARN_FIXTURES = [
         "C6",
         ["--parallel-workers", "2"],
         {"book_type": "txt"},
-        "--parallel-workers is used by the epub and markdown loaders only",
+        "--parallel-workers is used by the epub, markdown, and typst loaders only",
     ),
     (
         "C7",
@@ -536,7 +536,7 @@ WARN_FIXTURES = [
         "C21",
         ["--glossary", str(GLOSSARY)],
         {"book_type": "txt"},
-        "forwarded by the epub and markdown loaders only",
+        "forwarded by the epub, markdown, and typst loaders only",
     ),
     (
         # C22: only the epub format carries the record file

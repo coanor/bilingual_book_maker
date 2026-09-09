@@ -131,7 +131,7 @@ LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal
 # The loaders that actually forward context settings into the translator. The
 # others accept `context_flag` and drop it, so a session budget passed with
 # them would silently do nothing.
-CONTEXT_AWARE_BOOK_TYPES = ("epub", "md", "markdown")
+CONTEXT_AWARE_BOOK_TYPES = ("epub", "md", "markdown", "typ")
 
 # LLM formats that can resolve a model on their own, so --model is optional.
 MODEL_OPTIONAL_FORMATS = ("codex",)
@@ -935,7 +935,7 @@ def prompt_has_system(prompt_arg):
 # worker count and the context switch.
 TAG_AWARE_BOOK_TYPES = ("epub",)
 EXCLUDE_AWARE_BOOK_TYPES = ("epub", "md", "markdown")
-PARALLEL_AWARE_BOOK_TYPES = ("epub", "md", "markdown")
+PARALLEL_AWARE_BOOK_TYPES = ("epub", "md", "markdown", "typ")
 
 # Engines that detect the source language themselves, so `--source_lang`
 # reaches nothing they send.
@@ -1224,7 +1224,7 @@ COMPAT_RULES = (
         lambda f: f.options.parallel_workers > 1
         and f.book_type not in PARALLEL_AWARE_BOOK_TYPES,
         lambda f: (
-            f"--parallel-workers is used by the epub and markdown loaders "
+            f"--parallel-workers is used by the epub, markdown, and typst loaders "
             f"only; a {f.book_type} run stays serial."
         ),
     ),
@@ -1332,7 +1332,7 @@ COMPAT_RULES = (
         lambda f: bool(f.options.glossary_path)
         and f.book_type not in CONTEXT_AWARE_BOOK_TYPES,
         lambda f: (
-            f"{_glossary_flag(f)} is forwarded by the epub and markdown "
+            f"{_glossary_flag(f)} is forwarded by the epub, markdown, and typst "
             f"loaders only; a {f.book_type} run sends the model no glossary "
             f"block, and the file will be ignored."
         ),
