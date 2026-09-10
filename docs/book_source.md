@@ -19,6 +19,10 @@ wrappers is translated. The output is written beside the source as `*_bilingual.
 
     python3 make_book.py --book_name your_book.typ --api_format codex --language zh-hans
 
+Typst groups up to 10 text units per request by default. Use `--batch_size N`
+to change that for a new translation, and keep the same value when resuming a
+checkpoint.
+
 To convert an EPUB before translating it, use the bundled converter. It produces an A6
 Typst project and copies image resources into the output directory.
 

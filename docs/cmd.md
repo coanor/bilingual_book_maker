@@ -53,7 +53,7 @@ sections after it provide additional notes for selected workflows.
 | `--glossary-auto on\|off` | Whether a session run also keeps the renderings its own handoff reports establish. On by default wherever a session runs (`--use_context session`, and the `codex` format's one thread); `off` asks the compact turn for a summary only. Learned terms stay in this run and in `<book>_handoff.md`, and nowhere else. |
 | `--accumulated_num N` | EPUB token/character accumulation and SRT subtitle-block character batching (capped at 512 for SRT). In EPUB plan mode it is a per-request token budget: consecutive units of any length share one request up to `N` tokens (at most `--max-batch-units` units per request; half that when the endpoint verifies JSON mode but not a strict schema). Untyped, every plan run derives a default from the run's own prompt overhead — `2400` with the stock prompts, up to `3200` under a fat custom `--prompt` — halved per request (floor `1200`) on an endpoint without a strict-schema verdict, the same margin that halves the unit cap there; session runs (`codex` included) keep the un-halved value. The run narrates the number and the route class. Pass `1` to turn grouping off. Minimum `1`. |
 | `--max-batch-units N` | EPUB plan mode only: the most units `--accumulated_num`'s token budget may put in one request. Default `32` — half the measured fault-emergence level (first content faults at 64 effective units, September 2026, 923 requests over four books). An endpoint that verifies JSON mode but not a strict schema carries half this many (16), where reply miscounts actually live. Lower it if the run keeps printing misalignment recoveries. |
-| `--batch_size N` | Aggregated unit count for loaders that support it. |
+| `--batch_size N` | Text units grouped per request by the TXT, Markdown, Typst, and PDF loaders; default `10`. EPUB uses `--accumulated_num`. |
 | `--block_size N` | Merge paragraphs into delimiter-translated blocks. |
 | `--sentence_mode` | Translate EPUB paragraphs sentence by sentence; incompatible with plan mode. |
 | `--parallel-workers N` | Parallel EPUB chapters or Markdown/Typst batches and sections; default `1`. Refused with `--use_context session` (one history) and on the `codex` format (one thread). |
@@ -187,10 +187,13 @@ OpenAI-compatible URL and name the deployment in `--model`:
 
     bbook_maker --book_name 'animal_farm.epub' --key XXXXX --api_base 'https://example-endpoint.openai.azure.com/openai/v1' --model 'deployment-name'
 
-## Batch size (txt only)
+## Batch size (non-EPUB loaders)
 `--batch_size`<br>
 
-Use this parameter to specify the number of lines for batch translation. Default is 10. (Currently only effective for txt files).
+Use this parameter to specify the number of text units grouped per request by
+the TXT, Markdown, Typst, and PDF loaders. The default is 10. Keep the same
+value when resuming a saved Markdown or Typst translation because checkpoints
+are indexed by batch.
 ```sh
 python3 make_book.py --book_name test_books/the_little_prince.txt --test --batch_size 20
 ```

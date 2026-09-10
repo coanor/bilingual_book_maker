@@ -909,6 +909,21 @@ def _session_run_source(facts):
     return f"the {facts.api_format} route's one growing thread"
 
 
+def _session_grouping_off(facts):
+    if facts.book_type == "epub":
+        return (facts.options.accumulated_num or 1) <= 1
+    return facts.options.batch_size == 1
+
+
+def _session_grouping_advice(facts):
+    if facts.book_type == "epub":
+        return (
+            "Raise --accumulated_num to put several paragraphs in one request; "
+            "only plan mode derives that budget for you."
+        )
+    return "Raise --batch_size above 1 to put several text units in one request."
+
+
 def prompt_has_system(prompt_arg):
     """Whether `--prompt` carries a system message of its own.
 
@@ -1068,13 +1083,11 @@ COMPAT_RULES = (
         "warn",
         lambda f: session_run_expected(f)
         and not f.plan_mode
-        and (f.options.accumulated_num or 1) <= 1,
+        and _session_grouping_off(f),
         lambda f: (
             f"{_session_run_source(f)} outside plan mode leaves grouping "
             f"off, so every paragraph is its own request and each one "
-            f"re-reads the whole history. Raise --accumulated_num to put "
-            f"several paragraphs in one request; only plan mode derives that "
-            f"budget for you."
+            f"re-reads the whole history. {_session_grouping_advice(f)}"
         ),
     ),
     CompatRule(

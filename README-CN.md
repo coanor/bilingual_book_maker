@@ -393,7 +393,8 @@ codex "你好，请使用bbm-plan帮我将这本书：test_books/animal_farm.epu
 
 - `--batch_size`
 
-  指定批量翻译的行数(默认行数为 10，目前只对 txt 生效)
+  指定 TXT、Markdown、Typst 和 PDF loader 每次请求合并的文本单元数，默认
+  为 `10`。EPUB 改用 `--accumulated_num`。
 
 - `--accumulated_num`:
 

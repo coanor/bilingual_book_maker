@@ -715,6 +715,64 @@ class TestTheCodexThreadIsASessionWithoutTheFlag:
         )
         assert "A8" not in tripped(f)
 
+    def test_a_typst_codex_run_uses_its_grouping_default(self):
+        f = facts(
+            [
+                "--book_name",
+                "book.typ",
+                "--api_format",
+                "codex",
+                "--plan-classify",
+                "none",
+            ],
+            api_format="codex",
+            book_type="typ",
+        )
+
+        assert "A8" not in tripped(f)
+
+    def test_typst_accumulated_num_is_ignored_without_a_grouping_off_warning(self):
+        f = facts(
+            [
+                "--book_name",
+                "book.typ",
+                "--api_format",
+                "codex",
+                "--plan-classify",
+                "none",
+                "--accumulated_num",
+                "8",
+            ],
+            api_format="codex",
+            book_type="typ",
+        )
+
+        assert "C2" in tripped(f)
+        assert "A8" not in tripped(f)
+
+    def test_typst_batch_size_one_warns_with_the_right_flag(self, capsys):
+        f = facts(
+            [
+                "--book_name",
+                "book.typ",
+                "--api_format",
+                "codex",
+                "--plan-classify",
+                "none",
+                "--batch_size",
+                "1",
+            ],
+            api_format="codex",
+            book_type="typ",
+        )
+
+        assert "A8" in tripped(f)
+        check_compatibility(f)
+        out = " ".join(capsys.readouterr().out.split())
+        assert "leaves grouping off" in out
+        assert "Raise --batch_size" in out
+        assert "Raise --accumulated_num" not in out
+
     def test_the_cli_and_the_loader_name_the_same_sessions(self):
         # one attribute behind both answers: a route the loader bills as a
         # session and the table does not would be warned about wrongly, or

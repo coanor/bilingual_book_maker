@@ -442,7 +442,9 @@ codex "Hi, please use bbm-plan to translate this book: test_books/animal_farm.ep
 
 - `--batch_size`:
 
-  Use the `--batch_size` parameter to specify the number of lines for batch translation (default is 10, currently only effective for txt files).
+  Use `--batch_size` to specify how many text units are grouped in one request
+  by the TXT, Markdown, Typst, and PDF loaders (default `10`). EPUB uses
+  `--accumulated_num` instead.
 
 - `--accumulated_num`:
 
