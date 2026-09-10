@@ -47,7 +47,24 @@ class MappingModel:
 
 class DroppingMarkerModel(MappingModel):
     def translate_list(self, texts):
-        return [text.replace("@@BBM_TYPST_PROTECT_0@@", "") for text in texts]
+        translated = super().translate_list(texts)
+        return [text.replace("@@BBM_TYPST_PROTECT_0@@", "") for text in translated]
+
+
+class BatchDroppingMarkerModel(MappingModel):
+    def translate_list(self, texts):
+        translated = super().translate_list(texts)
+        if len(texts) > 1:
+            return [text.replace("@@BBM_TYPST_PROTECT_0@@", "") for text in translated]
+        return translated
+
+
+class BrokenFragmentModel(DroppingMarkerModel):
+    def translate_list(self, texts):
+        translated = super().translate_list(texts)
+        if len(texts) > 1 and not any("@@BBM_TYPST_PROTECT_" in text for text in texts):
+            return translated[:-1]
+        return translated
 
 
 class InterruptingModel(MappingModel):
@@ -179,12 +196,41 @@ def test_typst_loader_translates_internal_line_breaks_as_one_paragraph(tmp_path)
     assert "First line.\nSecond line.\n\n第一行。\n第二行。" in output
 
 
-def test_typst_loader_refuses_translation_that_drops_syntax_markers(tmp_path):
+def test_typst_loader_recovers_when_translation_drops_syntax_markers(tmp_path):
+    book = tmp_path / "book.typ"
+    book.write_text("A #emph[styled] paragraph.\n", encoding="utf-8")
+
+    make_loader(book, DroppingMarkerModel).make_bilingual_book()
+
+    output = (tmp_path / "book_bilingual.typ").read_text(encoding="utf-8")
+    assert "A #emph[styled] paragraph." in output
+    assert "一个#emph[有样式的]段落。" in output
+    assert not (tmp_path / "book_bilingual_temp.typ").exists()
+
+
+def test_typst_loader_retries_marker_failure_as_single_paragraph(tmp_path):
+    book = tmp_path / "book.typ"
+    book.write_text(
+        "A #emph[styled] paragraph.\n\nA #emph[styled] paragraph.\n",
+        encoding="utf-8",
+    )
+    loader = make_loader(book, BatchDroppingMarkerModel)
+    loader.batch_size = 2
+
+    loader.make_bilingual_book()
+
+    calls = BatchDroppingMarkerModel.instances[-1].calls
+    assert [len(call) for call in calls] == [2, 1, 1]
+    output = (tmp_path / "book_bilingual.typ").read_text(encoding="utf-8")
+    assert output.count("一个#emph[有样式的]段落。") == 2
+
+
+def test_typst_loader_still_stops_when_fragment_reassembly_is_ambiguous(tmp_path):
     book = tmp_path / "book.typ"
     book.write_text("A #emph[styled] paragraph.\n", encoding="utf-8")
 
     with pytest.raises(Exception, match="Something is wrong when translating"):
-        make_loader(book, DroppingMarkerModel).make_bilingual_book()
+        make_loader(book, BrokenFragmentModel).make_bilingual_book()
 
     assert not (tmp_path / "book_bilingual.typ").exists()
     temporary = (tmp_path / "book_bilingual_temp.typ").read_text(encoding="utf-8")

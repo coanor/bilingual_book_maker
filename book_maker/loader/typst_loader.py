@@ -203,6 +203,79 @@ class TypstBookLoader(MarkdownBookLoader):
             text = text.replace(token, original)
         return text
 
+    def _restore_or_recover_inline_markdown(
+        self,
+        source_text,
+        protected_text,
+        translated_text,
+        replacements,
+        breadcrumb,
+        translator,
+    ):
+        try:
+            return self._restore_inline_markdown(translated_text, replacements)
+        except ValueError:
+            print(
+                "[yellow]Typst syntax marker changed; retrying this paragraph "
+                "separately.[/yellow]"
+            )
+
+        retry = self._with_breadcrumb_context(
+            breadcrumb,
+            lambda: self._translate_list([protected_text], translator),
+            translator,
+        )
+        if len(retry) == 1:
+            try:
+                return self._restore_inline_markdown(retry[0], replacements)
+            except ValueError:
+                pass
+
+        print(
+            "[yellow]Typst marker retry failed; translating visible text "
+            "fragments and rebuilding the syntax.[/yellow]"
+        )
+        return self._translate_visible_fragments(source_text, breadcrumb, translator)
+
+    def _translate_visible_fragments(self, source_text, breadcrumb, translator):
+        protected_text, replacements = self._protect_inline_markdown(source_text)
+        if not replacements:
+            translated = self._with_breadcrumb_context(
+                breadcrumb,
+                lambda: self._translate_list([source_text], translator),
+                translator,
+            )
+            if len(translated) != 1:
+                raise ValueError(f"Expected 1 Typst translation, got {len(translated)}")
+            return translated[0]
+
+        token_pattern = re.compile(
+            "(" + "|".join(re.escape(token) for token in replacements) + ")"
+        )
+        pieces = token_pattern.split(protected_text)
+        visible_indexes = [
+            index
+            for index, piece in enumerate(pieces)
+            if piece and piece not in replacements and any(c.isalpha() for c in piece)
+        ]
+        visible_texts = [pieces[index] for index in visible_indexes]
+        translated = self._with_breadcrumb_context(
+            breadcrumb,
+            lambda: self._translate_list(visible_texts, translator),
+            translator,
+        )
+        if len(translated) != len(visible_texts):
+            raise ValueError(
+                f"Expected {len(visible_texts)} Typst fragments, got {len(translated)}"
+            )
+
+        for index, text in zip(visible_indexes, translated):
+            pieces[index] = text
+        for index, piece in enumerate(pieces):
+            if piece in replacements:
+                pieces[index] = replacements[piece]
+        return "".join(pieces)
+
     @staticmethod
     def _is_heading(text):
         return bool(re.match(r"^=+[ \t]+\S", text.strip()))
