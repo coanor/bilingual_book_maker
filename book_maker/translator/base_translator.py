@@ -346,20 +346,25 @@ class Base(ABC):
                 "renderings; this window adds no learned terms[/yellow]"
             )
         if not learned:
-            # Nothing new this window. The vocabulary earlier windows
-            # established still holds — an empty block means "no additions",
-            # so the merged glossary keeps riding the seed instead of
-            # vanishing from it.
-            return self.glossary.to_lines() if self.glossary else ""
+            # The accumulated vocabulary stays in memory and matching entries
+            # still ride with later units. Rewriting it into every report made
+            # a long book's handoff file grow quadratically.
+            return ""
         # This window's reading wins over earlier ones: the model has seen
         # more of the book than it had last time. Then the operator's pins are
         # laid over the top, so a term they chose never drifts, while
         # everything else keeps improving.
+        previous = self.glossary or Glossary()
         self.learned, _ = learned.merge(self.learned or Glossary())
         self.glossary, conflicts = (self.pinned or Glossary()).merge(self.learned)
         for conflict in conflicts:
             print(f"[yellow]ℹ glossary conflict — {conflict.describe()}[/yellow]")
-        return self.glossary.to_lines()
+        changed = []
+        for entry in learned.entries:
+            effective = self.glossary.lookup(entry.term)
+            if effective is not None and effective != previous.lookup(entry.term):
+                changed.append(effective)
+        return Glossary(changed).to_lines()
 
     def set_request_extras(self, extra_body=None, extra_headers=None):
         """Fields and headers to add to every request this route makes.
@@ -393,10 +398,11 @@ class Base(ABC):
     # Said only to requests that carry markers. A model told to preserve
     # tokens in a text that has none is being taught to invent them.
     MARKER_INSTRUCTION = (
-        "The text contains placeholder tokens written like ⟦code1⟧. Reproduce "
-        "every one of them exactly as written, each in the place the content "
-        "it stands for belongs in your translation. Never translate a token, "
-        "never change its spelling, and never invent one."
+        "The text contains placeholder tokens written like ⟦code1⟧ or "
+        "@@BBM_TYPST_PROTECT_0@@. Reproduce every one of them exactly as "
+        "written, each in the place the content it stands for belongs in your "
+        "translation. Never translate a token, never change its spelling, and "
+        "never invent one."
     )
 
     # Where each `--prompt` section lands on this route:
@@ -496,9 +502,10 @@ class Base(ABC):
     def _carries_markers(text):
         # Imported here: `book_maker.loader` pulls in the loaders, which
         # import this module.
-        from ..loader.markers import MARKER_RE
+        from ..loader.markers import MARKER_RE, TYPST_MARKER_RE
 
-        return bool(MARKER_RE.search(text or ""))
+        source = text or ""
+        return bool(MARKER_RE.search(source) or TYPST_MARKER_RE.search(source))
 
     def _augment_system_content(self, sys_content):
         """The system message plus what is true for the whole run.
@@ -895,13 +902,16 @@ class Base(ABC):
                 matches.sort(key=lambda x: int(x[0]))
                 result_list = [match[1].strip() for match in matches]
 
-        # Fallback: try splitting by BATCH_DELIMITER with flexible whitespace
+        # Fallback: tolerate changed blank-line spacing, but only when the
+        # delimiter occupies its own line. Typst protection tokens are shaped
+        # like ``@@BBM_TYPST_PROTECT_0@@``; splitting on every bare ``@@``
+        # turns each marker into two phantom translations.
         if len(result_list) != paragraph_count:
-            # Extract the core delimiter (e.g., '@@' from BATCH_DELIMITER)
             core_delimiter = BATCH_DELIMITER.strip()
-            # Split by the core delimiter with any surrounding whitespace/newlines
-            parts = re.split(r"\s*" + re.escape(core_delimiter) + r"\s*", text)
-            # Filter out empty strings
+            standalone_delimiter = (
+                r"(?:\r?\n)+[ \t]*" + re.escape(core_delimiter) + r"[ \t]*(?:\r?\n)+"
+            )
+            parts = re.split(standalone_delimiter, text)
             result_list = [p.strip() for p in parts if p.strip()]
 
         # There used to be a last rung here: split on every non-blank line.

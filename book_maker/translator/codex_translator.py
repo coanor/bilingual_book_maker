@@ -17,6 +17,7 @@ report as its instructions.
 
 from __future__ import annotations
 
+import json
 import time
 from datetime import datetime
 from pathlib import Path
@@ -30,6 +31,7 @@ from ..codex_client import (
     CodexError,
     CodexQuotaExhausted,
     CodexTurnFailed,
+    DEFAULT_REASONING_EFFORT,
 )
 from ..glossary import Glossary
 from ..session_context import (
@@ -39,7 +41,8 @@ from ..session_context import (
     handoff_prompt,
     strip_handoff_glossary,
 )
-from .base_translator import Base
+from ..structured import extract_json_object
+from .base_translator import Base, BatchMismatch
 
 BASE_INSTRUCTIONS = (
     "You are a translation engine inside a book translation tool. Translate "
@@ -50,12 +53,28 @@ BASE_INSTRUCTIONS = (
     "structure and any inline markup exactly as given."
 )
 
-# The prompt a batched window rides on when the user named none. A bare
-# `{text}` on purpose: `_build_batch_prompt` prepends the segment count and
-# the delimiter, and the thread instructions already carry the "translate
-# this, reply with nothing else" half, so anything more here would repeat an
-# instruction the thread has.
-BATCH_PROMPT = "{text}"
+# Codex app-server accepts a JSON Schema on each turn. IDs make alignment
+# checkable even when the model reorders rows; a bare delimiter cannot tell a
+# merged paragraph from a missing separator.
+BATCH_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "translations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer"},
+                    "translation": {"type": "string"},
+                },
+                "required": ["id", "translation"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["translations"],
+    "additionalProperties": False,
+}
 
 # Codex's own preamble dwarfs anything we can save per turn, so the warning
 # threshold is about the user's 5-hour window, not about tokens.
@@ -191,6 +210,7 @@ class Codex(Base):
         language,
         server=None,
         binary="codex",
+        reasoning_effort=DEFAULT_REASONING_EFFORT,
         context_compact_at=None,
         no_context_compact=False,
         glossary=None,
@@ -204,8 +224,18 @@ class Codex(Base):
         # `key` is accepted and ignored: this format authenticates through
         # codex's stored ChatGPT session.
         super().__init__(key or "", language)
-        self.server = server or CodexAppServer(binary=binary)
+        self.handoff_path = Path(handoff_path) if handoff_path else None
+        diagnostic_path = None
+        if self.handoff_path:
+            book_stem = self.handoff_path.stem.removesuffix("_handoff")
+            diagnostic_path = self.handoff_path.with_name(f"{book_stem}_codex.log")
+        self.server = server or CodexAppServer(
+            binary=binary,
+            reasoning_effort=reasoning_effort,
+            diagnostic_path=diagnostic_path,
+        )
         self._started = server is not None
+        self.reasoning_effort = reasoning_effort
         self.model = DEFAULT_MODEL
         self.model_list = None
         self.context_compact_at = context_compact_at
@@ -217,7 +247,6 @@ class Codex(Base):
         self.learned = Glossary()
         self.glossary = self.pinned
         self.glossary_auto = glossary_auto
-        self.handoff_path = Path(handoff_path) if handoff_path else None
         self.prompt_sys_msg = prompt_sys_msg
         self.prompt_template = prompt_template
         self.style_note = style_note
@@ -262,6 +291,9 @@ class Codex(Base):
     def preflight(self):
         """Confirm a login and say how much of the window is already spent."""
         limits = self._ensure_server().ensure_logged_in()
+        diagnostic_path = getattr(self.server, "diagnostic_path", None)
+        if diagnostic_path and not self.quiet:
+            print(f"[green]Codex diagnostics: {diagnostic_path}[/green]")
         if limits is None:
             return None
         plan = f" ({limits.plan_type} plan)" if limits.plan_type else ""
@@ -282,6 +314,14 @@ class Codex(Base):
                 f"{limits.remaining_percent:g}% of the window remaining[/green]"
             )
         return limits
+
+    def set_reasoning_effort(self, effort):
+        """Set the translation sidecar's effort before preflight starts it."""
+        if self._started:
+            raise CodexError("reasoning effort must be set before Codex starts")
+        self.reasoning_effort = effort
+        if hasattr(self.server, "reasoning_effort"):
+            self.server.reasoning_effort = effort
 
     @staticmethod
     def _reset_phrase(limits):
@@ -341,7 +381,7 @@ class Codex(Base):
             pass
         return True
 
-    def _run_turn(self, thread_id, payload):
+    def _run_turn(self, thread_id, payload, output_schema=None):
         """One turn, sitting out a spent quota window rather than failing."""
         for attempt in range(MAX_WAITS_PER_TURN + 1):
             limits = self.server.latest_rate_limits()
@@ -350,7 +390,9 @@ class Codex(Base):
                 if self._wait_out_reset(limits):
                     continue
             try:
-                return self.server.run_turn(thread_id, payload)
+                return self.server.run_turn(
+                    thread_id, payload, output_schema=output_schema
+                )
             except CodexTurnFailed:
                 # Only treat this as a quota stop if the quota says so —
                 # a failed turn has many other causes.
@@ -513,8 +555,12 @@ class Codex(Base):
         that.
         """
         if not self.prompt_template:
-            return text
-        return self.prompt_template.format(text=text, language=self.language, crlf="\n")
+            content = text
+        else:
+            content = self.prompt_template.format(
+                text=text, language=self.language, crlf="\n"
+            )
+        return self._marker_preamble(text) + content
 
     # ---- translation ------------------------------------------------------
 
@@ -552,30 +598,80 @@ class Codex(Base):
         return translated
 
     def translate_list(self, text_list):
-        """Translate a group of paragraphs in one turn.
+        """Translate a group in one schema-constrained, id-keyed turn."""
+        if not text_list:
+            return []
+        if len(text_list) == 1:
+            return [self.translate(str(text_list[0]).strip())]
 
-        Plan mode hands whole batches of short units here, and the batch is
-        the point: short lines only survive if they are translated together,
-        with their neighbours in view. The inherited default loops over
-        `translate` and dissolves the group into isolated lines, which is the
-        one thing `--poetry-group-size` exists to prevent — and on a metered
-        subscription it also pays for a turn per line instead of per stanza.
-
-        The delimiter contract and the count check come from the base, so
-        this route and the openai one agree on what a batch looks like — and
-        on raising `BatchMismatch` instead of repairing a bad reply here; the
-        loader's ladder owns the repair. `BATCH_PROMPT` is the carrier the base
-        needs and nothing more: the thread instructions already say to
-        translate whatever arrives, so the only thing worth adding on top of
-        the source is the base's own segment count.
-        """
-        return self._do_batch_translate(
-            text_list,
-            self.prompt_template,
-            self.prompt_sys_msg,
-            BATCH_PROMPT,
-            self.translate,
+        texts = [str(text).strip() for text in text_list]
+        source = json.dumps(
+            {
+                "paragraphs": [
+                    {"id": index, "text": text}
+                    for index, text in enumerate(texts)
+                ]
+            },
+            ensure_ascii=False,
         )
+        payload = self._unit_text(source) + (
+            "\n\nReturn a JSON object with a 'translations' array containing "
+            f"EXACTLY {len(texts)} objects. Each object must copy one input "
+            "'id' unchanged and put only its translation in 'translation'. "
+            "Use every input id exactly once."
+        )
+
+        with self._turn_lock:
+            thread_id = self._ensure_thread()
+            block = self.glossary.prompt_block(source) if self.glossary else ""
+            request = f"{block}\n\n{payload}" if block else payload
+            raw_reply = self._run_turn(
+                thread_id, request, output_schema=BATCH_OUTPUT_SCHEMA
+            )
+            translated = self._parse_batch_reply(raw_reply, texts)
+            self._report_quota()
+
+            self._window_tokens += estimate_tokens(source) + estimate_tokens(raw_reply)
+            if self._window_tokens >= self._budget():
+                if self.no_context_compact:
+                    self._start_empty_thread()
+                else:
+                    self._compact_window()
+
+        return translated
+
+    @staticmethod
+    def _parse_batch_reply(raw_reply, texts):
+        obj = extract_json_object(raw_reply, ("translations",))
+        if not isinstance(obj, dict) or not isinstance(obj.get("translations"), list):
+            raise BatchMismatch("no JSON object carrying a 'translations' array")
+
+        rows = obj["translations"]
+        if len(rows) != len(texts):
+            raise BatchMismatch(
+                f"expected {len(texts)} translations, got {len(rows)}"
+            )
+
+        by_id = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                raise BatchMismatch("a 'translations' entry is not an object")
+            item_id = row.get("id")
+            if isinstance(item_id, bool) or not isinstance(item_id, int):
+                raise BatchMismatch(f"invalid translation id {item_id!r}")
+            if item_id in by_id:
+                raise BatchMismatch(f"duplicate translation id {item_id}")
+            value = row.get("translation")
+            by_id[item_id] = value if isinstance(value, str) else ""
+
+        expected = set(range(len(texts)))
+        if set(by_id) != expected:
+            raise BatchMismatch(
+                f"reply ids {sorted(by_id)} do not match input ids {sorted(expected)}"
+            )
+        translated = [by_id[index] for index in range(len(texts))]
+        Codex._check_batch(texts, translated)
+        return translated
 
     def _chat_completion(self, prompt, model=None):
         """One arbitrary question, so plan classification works on this path.

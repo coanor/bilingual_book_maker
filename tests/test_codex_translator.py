@@ -1,10 +1,13 @@
 """The `codex` translator format: threads, windows, preflight."""
 
+import json
+
 import pytest
 
 from book_maker.session_context import handoff_prompt
 from book_maker.codex_client import CodexLoginRequired, CodexTurnFailed, RateLimits
 from book_maker.translator import FORMAT_DICT, LLM_FORMATS
+from book_maker.translator.base_translator import BatchMismatch
 from book_maker.translator.codex_translator import DEFAULT_MODEL, Codex
 
 
@@ -69,6 +72,14 @@ class TestRegistration:
     def test_counts_as_a_model_bearing_format(self):
         assert "codex" in LLM_FORMATS
 
+    def test_a_book_gets_a_persistent_codex_log(self, tmp_path):
+        translator = Codex(
+            key="",
+            language="Chinese",
+            handoff_path=tmp_path / "book_handoff.md",
+        )
+        assert translator.server.diagnostic_path == tmp_path / "book_codex.log"
+
 
 class TestPreflight:
     def test_login_failure_is_raised_not_swallowed(self):
@@ -101,6 +112,58 @@ class TestTranslation:
     def test_returns_the_turn_text(self):
         t = _codex(["狗叫了。"])
         assert t.translate("The dog barked.") == "狗叫了。"
+
+    def test_typst_marker_gets_a_preservation_instruction(self):
+        t = _codex(["譯文"])
+
+        t.translate("A @@BBM_TYPST_PROTECT_0@@ paragraph.")
+
+        sent = t.server.turns[0]["text"]
+        assert Codex.MARKER_INSTRUCTION in sent
+        assert "@@BBM_TYPST_PROTECT_0@@" in sent
+
+    def test_batch_uses_an_id_keyed_output_schema(self):
+        answer = json.dumps(
+            {
+                "translations": [
+                    {"id": 0, "translation": "一"},
+                    {"id": 1, "translation": "二"},
+                ]
+            },
+            ensure_ascii=False,
+        )
+        t = _codex([answer])
+
+        assert t.translate_list(["one", "two"]) == ["一", "二"]
+
+        turn = t.server.turns[0]
+        assert turn["schema"]["required"] == ["translations"]
+        assert '"id": 0' in turn["text"]
+        assert '"id": 1' in turn["text"]
+
+    def test_batch_results_are_aligned_by_id_not_reply_position(self):
+        answer = json.dumps(
+            {
+                "translations": [
+                    {"id": 1, "translation": "二"},
+                    {"id": 0, "translation": "一"},
+                ]
+            },
+            ensure_ascii=False,
+        )
+        t = _codex([answer])
+
+        assert t.translate_list(["one", "two"]) == ["一", "二"]
+
+    def test_batch_with_a_missing_id_is_rejected(self):
+        answer = json.dumps(
+            {"translations": [{"id": 0, "translation": "一"}]},
+            ensure_ascii=False,
+        )
+        t = _codex([answer])
+
+        with pytest.raises(BatchMismatch, match="expected 2 translations, got 1"):
+            t.translate_list(["one", "two"])
 
     def test_starts_one_thread_and_reuses_it(self):
         """A fresh thread costs ~17k tokens of preamble; reuse is the point."""

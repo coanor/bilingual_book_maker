@@ -4,7 +4,7 @@
 
 **中文 | [English](./README.md)**
 
-bilingual_book_maker 是一个 AI 翻译工具，使用 ChatGPT 帮助用户制作多语言版本的 epub/txt/md/srt/pdf 文件和图书。请仅将其用于您有权翻译的内容——您持有必要权利的作品、许可或授权允许您翻译的作品、公有领域图书，或适用法律另行允许的使用方式。请在使用之前阅读项目的 **[免责声明](./disclaimer.md)**。
+bilingual_book_maker 是一个 AI 翻译工具，使用 ChatGPT 帮助用户制作多语言版本的 epub/txt/md/typ/srt/pdf 文件和图书。请仅将其用于您有权翻译的内容——您持有必要权利的作品、许可或授权允许您翻译的作品、公有领域图书，或适用法律另行允许的使用方式。请在使用之前阅读项目的 **[免责声明](./disclaimer.md)**。
 
 [![Stars](https://img.shields.io/github/stars/yihong0618/bilingual_book_maker)](https://github.com/yihong0618/bilingual_book_maker/stargazers)
 [![CI](https://github.com/yihong0618/bilingual_book_maker/actions/workflows/make_test_ebook.yaml/badge.svg)](https://github.com/yihong0618/bilingual_book_maker/actions/workflows/make_test_ebook.yaml)
@@ -38,7 +38,7 @@ epub 标签分类在支持 JSON Schema 的接口上自动开启，在其他任�
 ## 准备
 
 1. ChatGPT or OpenAI token [^token]
-2. epub/txt/md books
+2. epub/txt/md/typ/srt/pdf books
 3. 能正常联网的环境或 proxy
 4. Python 3.10+
 
@@ -207,6 +207,9 @@ codex "你好，请使用bbm-plan帮我将这本书：test_books/animal_farm.epu
   使用 ChatGPT/Codex 订阅额度。需要安装
   [Codex CLI](https://developers.openai.com/codex/cli) 默认使用`gpt-5.6-luna`，可使用 `--api_format codex --model <id>`指定模型。整本书只开一个 session 并复用，到达 `--context-compact-at` 时压缩；
   运行在沙箱中，shell、MCP 服务器、浏览全部关闭。但hooks可能仍会触发。
+  BBM 默认使用 `low` 推理强度，而不继承交互式 Codex 配置；可用
+  `--codex-reasoning-effort <effort>` 覆盖。每次调用的耗时和 sidecar
+  错误会写到书籍旁的 `<book>_codex.log`。
 
   ```shell
   python3 make_book.py --book_name test_books/animal_farm.epub --api_format codex --language zh-hans
@@ -261,8 +264,8 @@ codex "你好，请使用bbm-plan帮我将这本书：test_books/animal_farm.epu
 
 ## 使用说明
 
-- 翻译完会生成一本 `{book_name}_bilingual.epub` 的双语书
-- 如果出现了错误或使用 `CTRL+C` 中断命令，不想接下来继续翻译了，会生成一本 `{book_name}_bilingual_temp.epub` 的书，直接改成你想要的名字就可以了
+- EPUB 会生成 `{book_name}_bilingual.epub`；TXT、Markdown、Typst 和 SRT 保持各自扩展名。Typst 输出为 `{book_name}_bilingual.typ`，翻译正文但保留排版指令。
+- 如果出现错误或使用 `CTRL+C` 中断，程序会在原文件旁保存对应格式的 `_bilingual_temp` 临时文件，可配合 `--resume` 继续。
 
 ## 参数说明
 
@@ -393,7 +396,8 @@ codex "你好，请使用bbm-plan帮我将这本书：test_books/animal_farm.epu
 
 - `--batch_size`
 
-  指定批量翻译的行数(默认行数为 10，目前只对 txt 生效)
+  指定 TXT、Markdown、Typst 和 PDF loader 每次请求合并的文本单元数，默认
+  为 `10`。EPUB 改用 `--accumulated_num`。
 
 - `--accumulated_num`:
 
@@ -428,7 +432,7 @@ codex "你好，请使用bbm-plan帮我将这本书：test_books/animal_farm.epu
 - `--glossary` / `--terminology`:
 
   一个 `term → translation` 术语文件（每行一条，`#` 之后是注释）。文件不存在时在解析阶段即报错退出。
-  仅 openai 系与 codex 路由、且书籍为 EPUB 或 Markdown 时生效；其他路由会提示并忽略。
+  仅 openai 系与 codex 路由、且书籍为 EPUB、Markdown 或 Typst 时生效；其他路由会提示并忽略。
   
   钉住一个术语就等于让译文照此表述，所以只钉你能负责的译法。
 
@@ -480,7 +484,7 @@ codex "你好，请使用bbm-plan帮我将这本书：test_books/animal_farm.epu
 
 - `--parallel-workers`:
 
-  并行处理 EPUB 章节或 Markdown 批次/分段，默认 1，建议 2–4。其他输入加载器目前
+  并行处理 EPUB 章节或 Markdown/Typst 批次和分段，默认 1，建议 2–4。其他输入加载器目前
   虽然接受这个共享参数，但不会并行执行。EPUB 的 `--use_context` 在并行模式下是
   章节内上下文，而不是全书共享上下文。
 

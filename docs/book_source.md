@@ -12,6 +12,22 @@ Markdown files can be translated directly with `--book_name your_doc.md`; use `-
 
 PromptDown `.md` files go to `--prompt`; Markdown books go to `--book_name`.
 
+## typst
+Typst `.typ` books can be translated directly. Layout directives such as `#set`, `#show`,
+`#image`, page breaks, fonts, and styled content wrappers are protected; prose inside the
+wrappers is translated. The output is written beside the source as `*_bilingual.typ`.
+
+    python3 make_book.py --book_name your_book.typ --api_format codex --language zh-hans
+
+Typst groups up to 10 text units per request by default. Use `--batch_size N`
+to change that for a new translation, and keep the same value when resuming a
+checkpoint.
+
+To convert an EPUB before translating it, use the bundled converter. It produces an A6
+Typst project and copies image resources into the output directory.
+
+    python3 tools/epub_to_typst.py your_book.epub typst-output
+
 ## epub
 epub is made of html files. By default, we only translate contents in `<p>`. Use `--translate-tags` to specify tags need for translation. Use comma to separate multiple tags. For example: `--translate-tags h1,h2,h3,p,div`
 

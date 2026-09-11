@@ -10,7 +10,7 @@ sections after it provide additional notes for selected workflows.
 
 | Option | Purpose |
 |---|---|
-| `--book_name PATH` | Input EPUB, TXT, Markdown, SRT, or PDF path (required). |
+| `--book_name PATH` | Input EPUB, TXT, Markdown, Typst, SRT, or PDF path (required). |
 | `--language LANGUAGE` | Target language: a tag (`zh-hant`), a name (`"Traditional Chinese"`), or `TAG:NAME` to pin both when the tables miss the language — tag → output stamps and field names, name → the prompt. Default `zh-hans`; list in `docs/languages.md`. |
 | `--source_lang LANGUAGE` | Source language. Stated, it reaches every LLM route's prompt, and the request body on `qwen`/`customapi`; default `auto` (states nothing). |
 | `--single_translate` | Output translation only instead of bilingual text. |
@@ -48,15 +48,16 @@ sections after it provide additional notes for selected workflows.
 | `--use_context [window\|session]` | Send earlier paragraphs as context. Bare or `window`: re-send the last few source/translation pairs (the long-standing behaviour). `session`: one append-only history, re-read at the endpoint's prompt-cache rate. |
 | `--context_paragraph_limit N` | Window mode only: context history limit. Parser default `0` means the translator default (3 paragraphs for ChatGPT), not zero history. |
 | `--context-compact-at N` | Estimated-token budget for a rolling history. In session mode the history is compacted into a handoff report at this size; minimum `500`. When unset, every session run — grouped or not, the `codex` format included — compacts at `8000`, printed at start (pinned on measurement: the cost optimum sits at 1500–4000, 8000 runs 9–25% above it — noise — and it is where a typical run compacts 0–1 times, so continuity costs the least; 20000 cost up to 56% more and drifted). Also bounds the plan classifier's conversation on endpoints that classify over a plain session (restart there, no handoff), with or without `--use_context`. An explicit value always wins. |
+| `--codex-reasoning-effort EFFORT` | Codex format only. Reasoning effort for the translation sidecar; default `low`, overriding the interactive Codex config for this BBM process. Turn latency and sidecar errors are written beside the book as `<book>_codex.log`. |
 | `--no-context-compact` | Session mode only: skip the handoff report. The window still rolls over at the budget, but the next one starts empty. |
-| `--glossary FILE` / `--terminology FILE` | A file of `term → translation` lines (one per line; `#` starts a note or a comment) this run must render that way. Two names for one flag. Only the terms that occur in a request are sent with it. A missing file stops the run at parse time. Read by the openai- and codex-shaped routes for EPUB and Markdown books; other routes warn and ignore it. |
-| `--glossary-auto on\|off` | Whether a session run also keeps the renderings its own handoff reports establish. On by default wherever a session runs (`--use_context session`, and the `codex` format's one thread); `off` asks the compact turn for a summary only. Learned terms stay in this run and in `<book>_handoff.md`, and nowhere else. |
+| `--glossary FILE` / `--terminology FILE` | A file of `term → translation` lines (one per line; `#` starts a note or a comment) this run must render that way. Two names for one flag. Only the terms that occur in a request are sent with it. A missing file stops the run at parse time. Read by the openai- and codex-shaped routes for EPUB, Markdown, and Typst books; other routes warn and ignore it. |
+| `--glossary-auto on\|off` | Whether a session run also keeps the renderings its own handoff reports establish. On by default wherever a session runs (`--use_context session`, and the `codex` format's one thread); `off` asks the compact turn for a summary only. Learned terms stay in this run; each window appends only its additions or changes to `<book>_handoff.md`. |
 | `--accumulated_num N` | EPUB token/character accumulation and SRT subtitle-block character batching (capped at 512 for SRT). In EPUB plan mode it is a per-request token budget: consecutive units of any length share one request up to `N` tokens (at most `--max-batch-units` units per request; half that when the endpoint verifies JSON mode but not a strict schema). Untyped, every plan run derives a default from the run's own prompt overhead — `2400` with the stock prompts, up to `3200` under a fat custom `--prompt` — halved per request (floor `1200`) on an endpoint without a strict-schema verdict, the same margin that halves the unit cap there; session runs (`codex` included) keep the un-halved value. The run narrates the number and the route class. Pass `1` to turn grouping off. Minimum `1`. |
 | `--max-batch-units N` | EPUB plan mode only: the most units `--accumulated_num`'s token budget may put in one request. Default `32` — half the measured fault-emergence level (first content faults at 64 effective units, September 2026, 923 requests over four books). An endpoint that verifies JSON mode but not a strict schema carries half this many (16), where reply miscounts actually live. Lower it if the run keeps printing misalignment recoveries. |
-| `--batch_size N` | Aggregated unit count for loaders that support it. |
+| `--batch_size N` | Text units grouped per request by the TXT, Markdown, Typst, and PDF loaders; default `10`. EPUB uses `--accumulated_num`. |
 | `--block_size N` | Merge paragraphs into delimiter-translated blocks. |
 | `--sentence_mode` | Translate EPUB paragraphs sentence by sentence; incompatible with plan mode. |
-| `--parallel-workers N` | Parallel EPUB chapters or Markdown batches/sections; default `1`. Refused with `--use_context session` (one history) and on the `codex` format (one thread). |
+| `--parallel-workers N` | Parallel EPUB chapters or Markdown/Typst batches and sections; default `1`. Refused with `--use_context session` (one history) and on the `codex` format (one thread). |
 | `--batch` | Submit a ChatGPT Batch API job. Refused on EPUB (the queue path is unreachable there: the run would translate live at full price and submit an empty job instead of writing the book) and on routes without the Batch API. |
 | `--batch-use` | Consume a previously submitted batch job. Refused on EPUB, like `--batch`. |
 | `--extra_body JSON` | Extra fields on every request body, for the routes that build one (`openai`, `groq`, `xai`, `litellm`, `--model orcarouter`, `anthropic`); the others ignore it and say so. Reaches the capability probe and the JSON rungs too, so the endpoint is graded on the request the run makes. Merged over the named parameters, so a field here beats the flag for it. |
@@ -187,10 +188,13 @@ OpenAI-compatible URL and name the deployment in `--model`:
 
     bbook_maker --book_name 'animal_farm.epub' --key XXXXX --api_base 'https://example-endpoint.openai.azure.com/openai/v1' --model 'deployment-name'
 
-## Batch size (txt only)
+## Batch size (non-EPUB loaders)
 `--batch_size`<br>
 
-Use this parameter to specify the number of lines for batch translation. Default is 10. (Currently only effective for txt files).
+Use this parameter to specify the number of text units grouped per request by
+the TXT, Markdown, Typst, and PDF loaders. The default is 10. Keep the same
+value when resuming a saved Markdown or Typst translation because checkpoints
+are indexed by batch.
 ```sh
 python3 make_book.py --book_name test_books/the_little_prince.txt --test --batch_size 20
 ```

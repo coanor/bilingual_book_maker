@@ -5,7 +5,7 @@
 **[中文](./README-CN.md) | English**
 
 
-The bilingual_book_maker is an AI translation tool that uses ChatGPT to assist users in creating multi-language versions of epub/txt/md/srt/pdf files and books. Use it only with material you have the right to translate — works for which you hold the necessary rights, suitably licensed or permitted works, public-domain books, or uses otherwise allowed by applicable law. Before using this tool, please review the project's **[disclaimer](./disclaimer.md)**.
+The bilingual_book_maker is an AI translation tool that uses ChatGPT to assist users in creating multi-language versions of epub/txt/md/typ/srt/pdf files and books. Use it only with material you have the right to translate — works for which you hold the necessary rights, suitably licensed or permitted works, public-domain books, or uses otherwise allowed by applicable law. Before using this tool, please review the project's **[disclaimer](./disclaimer.md)**.
 
 [![Stars](https://img.shields.io/github/stars/yihong0618/bilingual_book_maker)](https://github.com/yihong0618/bilingual_book_maker/stargazers)
 [![CI](https://github.com/yihong0618/bilingual_book_maker/actions/workflows/make_test_ebook.yaml/badge.svg)](https://github.com/yihong0618/bilingual_book_maker/actions/workflows/make_test_ebook.yaml)
@@ -42,7 +42,7 @@ Older flags (`--model gpt4o`,
 ## Preparation
 
 1. ChatGPT or OpenAI token [^token]
-2. epub/txt/md/pdf books
+2. epub/txt/md/typ/srt/pdf books
 3. Environment with internet access or proxy
 4. Python 3.10+
 
@@ -220,6 +220,9 @@ codex "Hi, please use bbm-plan to translate this book: test_books/animal_farm.ep
   Spend your ChatGPT/Codex plan. Install the
   [Codex CLI](https://developers.openai.com/codex/cli). The default model is `gpt-5.6-luna`; `--api_format codex --model <id>` names another. One session is reused for the whole book and compacted at `--context-compact-at`;
   it runs sandboxed, with shell, MCP servers and browsing off, but hooks may still fire.
+  BBM uses `low` reasoning effort instead of inheriting the interactive Codex
+  setting; override it with `--codex-reasoning-effort <effort>`. Turn latency
+  and sidecar errors are written beside the book as `<book>_codex.log`.
 
   ```shell
   python3 make_book.py --book_name test_books/animal_farm.epub --api_format codex --language zh-hans
@@ -287,7 +290,7 @@ codex "Hi, please use bbm-plan to translate this book: test_books/animal_farm.ep
 
 ## Usage
 
-- Once the translation is complete, a bilingual book named `${book_name}_bilingual.epub` would be generated for EPUB inputs; for TXT/MD/SRT inputs a bilingual text (or subtitle) file named `${book_name}_bilingual.txt` (or `_bilingual.srt`) will be generated. For **PDF inputs** the tool will produce a bilingual `.txt` fallback and will also attempt to create `${book_name}_bilingual.epub` — if EPUB creation fails, the TXT fallback remains so you do not need to retranslate.
+- Once the translation is complete, a bilingual book named `${book_name}_bilingual.epub` would be generated for EPUB inputs. TXT/MD/TYP/SRT inputs keep their corresponding extension; Typst output is `${book_name}_bilingual.typ` and preserves layout directives while translating prose. For **PDF inputs** the tool will produce a bilingual `.txt` fallback and will also attempt to create `${book_name}_bilingual.epub` — if EPUB creation fails, the TXT fallback remains so you do not need to retranslate.
 - If there are any errors or you wish to interrupt the translation by pressing `CTRL+C`, a temporary bilingual file (for example `{book_name}_bilingual_temp.epub` or `{book_name}_bilingual_temp.txt`) would be generated. You can simply rename it to any desired name.
 
 ## Params
@@ -442,7 +445,9 @@ codex "Hi, please use bbm-plan to translate this book: test_books/animal_farm.ep
 
 - `--batch_size`:
 
-  Use the `--batch_size` parameter to specify the number of lines for batch translation (default is 10, currently only effective for txt files).
+  Use `--batch_size` to specify how many text units are grouped in one request
+  by the TXT, Markdown, Typst, and PDF loaders (default `10`). EPUB uses
+  `--accumulated_num` instead.
 
 - `--accumulated_num`:
 
@@ -481,7 +486,7 @@ codex "Hi, please use bbm-plan to translate this book: test_books/animal_farm.ep
 
   A file of `term → translation` lines — one per line, `#` starts a note or a
   comment. A missing file stops the run at parse time.
-  Read by the openai- and codex-shaped routes for EPUB and Markdown books; the
+  Read by the openai- and codex-shaped routes for EPUB, Markdown, and Typst books; the
   other routes say so and ignore it.
 
   A pinned term makes the translation say what you pinned, so pin only
@@ -494,7 +499,7 @@ codex "Hi, please use bbm-plan to translate this book: test_books/animal_farm.ep
 
 - `--parallel-workers`:
 
-  Use `--parallel-workers` to process EPUB chapters or Markdown batches/sections in
+  Use `--parallel-workers` to process EPUB chapters or Markdown/Typst batches and sections in
   parallel. Values greater than `1` spin up multiple workers (recommended: `2-4`) and
   automatically fall back to sequential mode when there is only one unit of work. Other
   input loaders currently accept this shared CLI option but do not parallelize their work.

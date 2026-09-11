@@ -603,8 +603,17 @@ class MarkdownBookLoader(BaseBookLoader):
                     f"Expected {len(batch_texts)} translations, got {len(translated_items)}"
                 )
             return [
-                self._restore_inline_markdown(translated_text, replacements)
-                for translated_text, replacements in zip(
+                self._restore_or_recover_inline_markdown(
+                    source_text,
+                    protected_text,
+                    translated_text,
+                    replacements,
+                    breadcrumb,
+                    translator,
+                )
+                for source_text, protected_text, translated_text, replacements in zip(
+                    batch_texts,
+                    protected_items,
                     translated_items,
                     replacement_items,
                 )
@@ -618,6 +627,17 @@ class MarkdownBookLoader(BaseBookLoader):
     def _translate_list(self, texts, translator=None):
         translator = translator if translator is not None else self.translate_model
         return translate_list_or_singles(translator, texts)
+
+    def _restore_or_recover_inline_markdown(
+        self,
+        source_text,
+        protected_text,
+        translated_text,
+        replacements,
+        breadcrumb,
+        translator,
+    ):
+        return self._restore_inline_markdown(translated_text, replacements)
 
     def _coerce_saved_batch(self, saved_batch, batch_texts):
         if isinstance(saved_batch, list):

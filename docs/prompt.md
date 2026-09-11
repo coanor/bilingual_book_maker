@@ -11,6 +11,11 @@ To tweak the prompt, use the `--prompt` parameter. Valid placeholders for the `u
 
 - If you need to set the `system` role content, you can use the following format: `--prompt '{"user":"Translate {text} to {language}", "system": "You are a professional translator."}'` or `--prompt prompt_template_sample.json`
 
+- For Taiwan Traditional Chinese nonfiction, use `--language zh-tw --prompt
+  prompt_taiwan_nonfiction.json`. This asks for Taiwan publishing syntax and
+  context-sensitive regional terminology instead of character conversion
+  alone.
+
         # prompt_template_sample.json
         {
             "system": "You are a professional translator.", 

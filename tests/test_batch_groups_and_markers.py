@@ -184,6 +184,20 @@ class TestBatchMismatchContract:
         assert len(calls) == 1  # no self-repair requests
         assert BATCH_DELIMITER  # still the wire format for this route
 
+    def test_typst_protection_markers_are_not_batch_delimiters(self):
+        from book_maker.translator.base_translator import Base
+
+        reply = "甲@@BBM_TYPST_PROTECT_0@@乙\n\n@@\n\n" "丙@@BBM_TYPST_PROTECT_1@@丁"
+        assert Base._extract_paragraphs(None, reply, 2) == [
+            "甲@@BBM_TYPST_PROTECT_0@@乙",
+            "丙@@BBM_TYPST_PROTECT_1@@丁",
+        ]
+
+    def test_batch_delimiter_tolerates_changed_blank_line_spacing(self):
+        from book_maker.translator.base_translator import Base
+
+        assert Base._extract_paragraphs(None, "甲\n @@ \n乙", 2) == ["甲", "乙"]
+
 
 # --------------------------------- C. structured id echo (openai route)
 

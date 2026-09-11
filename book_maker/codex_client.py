@@ -38,13 +38,21 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 
 # A turn is a model call, and a slow model on a long paragraph is normal.
 DEFAULT_TURN_TIMEOUT = 600.0
 # Everything else is local bookkeeping inside the sidecar.
 DEFAULT_REQUEST_TIMEOUT = 60.0
+
+# Translation is a constrained transformation, not an agentic coding task.
+# Do not inherit a user's interactive Codex setting (often "high") and spend
+# that reasoning latency on every paragraph of a book.
+DEFAULT_REASONING_EFFORT = "low"
 
 # What Codex records this client as: it shows up in the app-server's
 # userAgent, and is how a run of ours is told apart from the Codex CLI or the
@@ -237,10 +245,18 @@ class CodexAppServer:
     removal, so nothing here trusts instructions to do a flag's job.
     """
 
-    def __init__(self, binary="codex", spawn=None):
+    def __init__(
+        self,
+        binary="codex",
+        spawn=None,
+        reasoning_effort=DEFAULT_REASONING_EFFORT,
+        diagnostic_path=None,
+    ):
         # `spawn` takes the extra CLI args for one sidecar spawn.
         self._spawn = spawn or self._spawn_codex
         self.binary = binary
+        self.reasoning_effort = reasoning_effort
+        self.diagnostic_path = Path(diagnostic_path) if diagnostic_path else None
         # Serializes start(): during the two-phase boot `process` is set
         # before verification has run, and a concurrent start() must wait for
         # the verified sidecar rather than return the unverified one.
@@ -248,6 +264,7 @@ class CodexAppServer:
         self._run_dir = None
         self._work_dir = None
         self._stderr_path = None
+        self._stderr_mark = 0
         self._stderr_file = None
         self.process = None
         self._lock = threading.Lock()
@@ -274,7 +291,9 @@ class CodexAppServer:
         # stderr goes to a file, not a pipe: nothing drains a pipe here, so a
         # chatty sidecar would fill it and stall, while a file never
         # backpressures — and a spawn that dies leaves its reason readable.
-        self._stderr_file = open(self._stderr_path, "w")
+        mode = "a" if self.diagnostic_path else "w"
+        self._stderr_mark = os.path.getsize(self._stderr_path) if mode == "a" else 0
+        self._stderr_file = open(self._stderr_path, mode)
         return subprocess.Popen(
             [self.binary, "app-server", *args],
             stdin=subprocess.PIPE,
@@ -291,7 +310,12 @@ class CodexAppServer:
                 return self
             self._run_dir = tempfile.mkdtemp(prefix="bbm-codex-")
             try:
-                self._stderr_path = os.path.join(self._run_dir, "stderr.log")
+                self._stderr_path = str(
+                    self.diagnostic_path or Path(self._run_dir) / "stderr.log"
+                )
+                if self.diagnostic_path:
+                    self.diagnostic_path.parent.mkdir(parents=True, exist_ok=True)
+                    self._append_diagnostic("sidecar starting")
                 # The sidecar's and every thread's cwd. Empty and private on
                 # purpose: `.` ran book turns wherever the user launched bbm,
                 # with that directory's project config — and, before `hooks`
@@ -372,7 +396,10 @@ class CodexAppServer:
 
     def _start_hardened(self, servers, init_timeout):
         disables = list(UNWANTED_FEATURES)
-        overrides = []
+        overrides = [
+            "-c",
+            f'model_reasoning_effort="{self.reasoning_effort}"',
+        ]
         for name in servers:
             overrides += ["-c", f"mcp_servers.{name}.enabled=false"]
         while True:
@@ -400,6 +427,7 @@ class CodexAppServer:
     def _unknown_feature(self):
         try:
             with open(self._stderr_path) as f:
+                f.seek(self._stderr_mark)
                 match = _UNKNOWN_FEATURE.search(f.read())
         except OSError:
             return None
@@ -495,6 +523,18 @@ class CodexAppServer:
         self._stderr_path = None
         if run_dir:
             shutil.rmtree(run_dir, ignore_errors=True)
+
+    def _append_diagnostic(self, message):
+        if not self.diagnostic_path:
+            return
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        try:
+            with self.diagnostic_path.open("a", encoding="utf-8") as handle:
+                handle.write(f"{stamp} BBM {message}\n")
+        except OSError:
+            # Diagnostics must never turn a successful translation into a
+            # failed one (read-only media and full disks are both plausible).
+            pass
 
     def __enter__(self):
         return self.start()
@@ -688,11 +728,23 @@ class CodexAppServer:
         sending and scanned from that mark.
         """
         timeout = DEFAULT_TURN_TIMEOUT if timeout is None else timeout
+        started = time.monotonic()
+        status = "failed"
         # Reserved before the request goes out, not when the wait starts: in
         # the gap between the two, another turn's prune could drop the very
         # completion this call is about to look for.
-        with self._reserve_mark() as mark:
-            return self._run_turn_from(mark, thread_id, text, output_schema, timeout)
+        try:
+            with self._reserve_mark() as mark:
+                result = self._run_turn_from(
+                    mark, thread_id, text, output_schema, timeout
+                )
+            status = "completed"
+            return result
+        finally:
+            elapsed = time.monotonic() - started
+            self._append_diagnostic(
+                f"turn {status} elapsed={elapsed:.3f}s input_chars={len(text)}"
+            )
 
     def _run_turn_from(self, mark, thread_id, text, output_schema, timeout):
         params = {"threadId": thread_id, "input": [{"type": "text", "text": text}]}

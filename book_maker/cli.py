@@ -131,7 +131,7 @@ LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal
 # The loaders that actually forward context settings into the translator. The
 # others accept `context_flag` and drop it, so a session budget passed with
 # them would silently do nothing.
-CONTEXT_AWARE_BOOK_TYPES = ("epub", "md", "markdown")
+CONTEXT_AWARE_BOOK_TYPES = ("epub", "md", "markdown", "typ")
 
 # LLM formats that can resolve a model on their own, so --model is optional.
 MODEL_OPTIONAL_FORMATS = ("codex",)
@@ -909,6 +909,21 @@ def _session_run_source(facts):
     return f"the {facts.api_format} route's one growing thread"
 
 
+def _session_grouping_off(facts):
+    if facts.book_type == "epub":
+        return (facts.options.accumulated_num or 1) <= 1
+    return facts.options.batch_size == 1
+
+
+def _session_grouping_advice(facts):
+    if facts.book_type == "epub":
+        return (
+            "Raise --accumulated_num to put several paragraphs in one request; "
+            "only plan mode derives that budget for you."
+        )
+    return "Raise --batch_size above 1 to put several text units in one request."
+
+
 def prompt_has_system(prompt_arg):
     """Whether `--prompt` carries a system message of its own.
 
@@ -935,7 +950,7 @@ def prompt_has_system(prompt_arg):
 # worker count and the context switch.
 TAG_AWARE_BOOK_TYPES = ("epub",)
 EXCLUDE_AWARE_BOOK_TYPES = ("epub", "md", "markdown")
-PARALLEL_AWARE_BOOK_TYPES = ("epub", "md", "markdown")
+PARALLEL_AWARE_BOOK_TYPES = ("epub", "md", "markdown", "typ")
 
 # Engines that detect the source language themselves, so `--source_lang`
 # reaches nothing they send.
@@ -1068,13 +1083,11 @@ COMPAT_RULES = (
         "warn",
         lambda f: session_run_expected(f)
         and not f.plan_mode
-        and (f.options.accumulated_num or 1) <= 1,
+        and _session_grouping_off(f),
         lambda f: (
             f"{_session_run_source(f)} outside plan mode leaves grouping "
             f"off, so every paragraph is its own request and each one "
-            f"re-reads the whole history. Raise --accumulated_num to put "
-            f"several paragraphs in one request; only plan mode derives that "
-            f"budget for you."
+            f"re-reads the whole history. {_session_grouping_advice(f)}"
         ),
     ),
     CompatRule(
@@ -1224,7 +1237,7 @@ COMPAT_RULES = (
         lambda f: f.options.parallel_workers > 1
         and f.book_type not in PARALLEL_AWARE_BOOK_TYPES,
         lambda f: (
-            f"--parallel-workers is used by the epub and markdown loaders "
+            f"--parallel-workers is used by the epub, markdown, and typst loaders "
             f"only; a {f.book_type} run stays serial."
         ),
     ),
@@ -1332,7 +1345,7 @@ COMPAT_RULES = (
         lambda f: bool(f.options.glossary_path)
         and f.book_type not in CONTEXT_AWARE_BOOK_TYPES,
         lambda f: (
-            f"{_glossary_flag(f)} is forwarded by the epub and markdown "
+            f"{_glossary_flag(f)} is forwarded by the epub, markdown, and typst "
             f"loaders only; a {f.book_type} run sends the model no glossary "
             f"block, and the file will be ignored."
         ),
@@ -1962,6 +1975,14 @@ off. Minimum 1.
         f"value always wins; minimum 500",
     )
     parser.add_argument(
+        "--codex-reasoning-effort",
+        dest="codex_reasoning_effort",
+        default="low",
+        help="codex format only: reasoning effort used by the translation "
+        "sidecar (default: low). This overrides model_reasoning_effort from "
+        "the user's Codex config for this BBM process only",
+    )
+    parser.add_argument(
         "--no-context-compact",
         dest="no_context_compact",
         action="store_true",
@@ -2489,6 +2510,8 @@ def main():
         parallel_workers=options.parallel_workers,
         **loader_kwargs,
     )
+    if api_format == "codex":
+        e.translate_model.set_reasoning_effort(options.codex_reasoning_effort)
     if options.glossary_path:
         # The translation metadata record embeds the operator's file (never a derived
         # glossary), and the loader only knows about it through this
