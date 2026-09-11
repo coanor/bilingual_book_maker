@@ -900,13 +900,16 @@ class Base(ABC):
                 matches.sort(key=lambda x: int(x[0]))
                 result_list = [match[1].strip() for match in matches]
 
-        # Fallback: try splitting by BATCH_DELIMITER with flexible whitespace
+        # Fallback: tolerate changed blank-line spacing, but only when the
+        # delimiter occupies its own line. Typst protection tokens are shaped
+        # like ``@@BBM_TYPST_PROTECT_0@@``; splitting on every bare ``@@``
+        # turns each marker into two phantom translations.
         if len(result_list) != paragraph_count:
-            # Extract the core delimiter (e.g., '@@' from BATCH_DELIMITER)
             core_delimiter = BATCH_DELIMITER.strip()
-            # Split by the core delimiter with any surrounding whitespace/newlines
-            parts = re.split(r"\s*" + re.escape(core_delimiter) + r"\s*", text)
-            # Filter out empty strings
+            standalone_delimiter = (
+                r"(?:\r?\n)+[ \t]*" + re.escape(core_delimiter) + r"[ \t]*(?:\r?\n)+"
+            )
+            parts = re.split(standalone_delimiter, text)
             result_list = [p.strip() for p in parts if p.strip()]
 
         # There used to be a last rung here: split on every non-blank line.
