@@ -10,6 +10,8 @@ from .md_loader import MarkdownBookLoader
 class TypstBookLoader(MarkdownBookLoader):
     """Translate prose in Typst source while leaving layout code untouched."""
 
+    _SUSPECT_MARKER_RE = re.compile(r"@@[^@\r\n]{1,128}@@")
+
     _NON_TEXT_PREFIXES = (
         "#set ",
         "#show ",
@@ -195,13 +197,41 @@ class TypstBookLoader(MarkdownBookLoader):
         end = text.find(marker, start + len(marker))
         return len(text) if end < 0 else end + len(marker)
 
+    @classmethod
+    def _unexpected_marker(cls, text, allowed=()):
+        unclaimed = text
+        for marker in allowed:
+            unclaimed = unclaimed.replace(marker, "", 1)
+        match = cls._SUSPECT_MARKER_RE.search(unclaimed)
+        if match:
+            return match.group(0)
+        if "@@BBM_TYPST_PROTECT_" in unclaimed:
+            return "@@BBM_TYPST_PROTECT_..."
+        return None
+
     @staticmethod
     def _restore_inline_markdown(text, replacements):
         for token, original in replacements.items():
             if text.count(token) != 1:
                 raise ValueError(f"Translation did not preserve Typst marker {token}")
+
+        marker = TypstBookLoader._unexpected_marker(text, replacements)
+        if marker:
+            raise ValueError(f"Translation invented Typst marker {marker}")
+
+        for token, original in replacements.items():
             text = text.replace(token, original)
         return text
+
+    def _coerce_saved_batch(self, saved_batch, batch_texts):
+        translated = super()._coerce_saved_batch(saved_batch, batch_texts)
+        if len(translated) != len(batch_texts):
+            return translated
+        for source, target in zip(batch_texts, translated):
+            allowed = self._SUSPECT_MARKER_RE.findall(source)
+            if self._unexpected_marker(target, allowed):
+                return None
+        return translated
 
     def _restore_or_recover_inline_markdown(
         self,
@@ -247,7 +277,7 @@ class TypstBookLoader(MarkdownBookLoader):
             )
             if len(translated) != 1:
                 raise ValueError(f"Expected 1 Typst translation, got {len(translated)}")
-            return translated[0]
+            return self._restore_inline_markdown(translated[0], {})
 
         token_pattern = re.compile(
             "(" + "|".join(re.escape(token) for token in replacements) + ")"
@@ -270,7 +300,7 @@ class TypstBookLoader(MarkdownBookLoader):
             )
 
         for index, text in zip(visible_indexes, translated):
-            pieces[index] = text
+            pieces[index] = self._restore_inline_markdown(text, {})
         for index, piece in enumerate(pieces):
             if piece in replacements:
                 pieces[index] = replacements[piece]

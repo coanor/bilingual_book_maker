@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -56,6 +57,14 @@ class BatchDroppingMarkerModel(MappingModel):
         translated = super().translate_list(texts)
         if len(texts) > 1:
             return [text.replace("@@BBM_TYPST_PROTECT_0@@", "") for text in translated]
+        return translated
+
+
+class InventingMarkerOnceModel(MappingModel):
+    def translate_list(self, texts):
+        translated = super().translate_list(texts)
+        if len(self.calls) == 1:
+            return [f"{text}@@hallucinated marker@@" for text in translated]
         return translated
 
 
@@ -223,6 +232,36 @@ def test_typst_loader_retries_marker_failure_as_single_paragraph(tmp_path):
     assert [len(call) for call in calls] == [2, 1, 1]
     output = (tmp_path / "book_bilingual.typ").read_text(encoding="utf-8")
     assert output.count("一个#emph[有样式的]段落。") == 2
+
+
+def test_typst_loader_retries_a_translation_that_invents_a_marker(tmp_path):
+    book = tmp_path / "book.typ"
+    book.write_text("A paragraph.\n", encoding="utf-8")
+
+    make_loader(book, InventingMarkerOnceModel).make_bilingual_book()
+
+    calls = InventingMarkerOnceModel.instances[-1].calls
+    assert [len(call) for call in calls] == [1, 1]
+    output = (tmp_path / "book_bilingual.typ").read_text(encoding="utf-8")
+    assert "一个段落。" in output
+    assert "@@" not in output
+
+
+def test_typst_loader_retranslates_a_cached_invented_marker(tmp_path):
+    book = tmp_path / "book.typ"
+    book.write_text("A paragraph.\n", encoding="utf-8")
+    (tmp_path / ".book.temp.bin").write_text(
+        json.dumps([["一個@@hallucinated marker@@段落。"]], ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    make_loader(book, MappingModel, resume=True).make_bilingual_book()
+
+    calls = MappingModel.instances[-1].calls
+    assert [len(call) for call in calls] == [1]
+    output = (tmp_path / "book_bilingual.typ").read_text(encoding="utf-8")
+    assert "一个段落。" in output
+    assert "@@" not in output
 
 
 def test_typst_loader_still_stops_when_fragment_reassembly_is_ambiguous(tmp_path):
