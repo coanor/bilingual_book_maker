@@ -106,7 +106,11 @@ class TestParsingTheSections:
         assert capsys.readouterr().out == ""
 
     def test_the_shipped_sample_files_parse(self):
-        for name in ("prompt_sections_sample.json", "prompt_session_sample.json"):
+        for name in (
+            "prompt_sections_sample.json",
+            "prompt_session_sample.json",
+            "prompt_taiwan_nonfiction.json",
+        ):
             parsed = parse_prompt_arg(name, announce=False)
             assert set(parsed) == set(PROMPT_SECTIONS), name
             assert all(parsed[section] for section in PROMPT_SECTIONS), name
