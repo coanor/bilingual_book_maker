@@ -346,20 +346,25 @@ class Base(ABC):
                 "renderings; this window adds no learned terms[/yellow]"
             )
         if not learned:
-            # Nothing new this window. The vocabulary earlier windows
-            # established still holds — an empty block means "no additions",
-            # so the merged glossary keeps riding the seed instead of
-            # vanishing from it.
-            return self.glossary.to_lines() if self.glossary else ""
+            # The accumulated vocabulary stays in memory and matching entries
+            # still ride with later units. Rewriting it into every report made
+            # a long book's handoff file grow quadratically.
+            return ""
         # This window's reading wins over earlier ones: the model has seen
         # more of the book than it had last time. Then the operator's pins are
         # laid over the top, so a term they chose never drifts, while
         # everything else keeps improving.
+        previous = self.glossary or Glossary()
         self.learned, _ = learned.merge(self.learned or Glossary())
         self.glossary, conflicts = (self.pinned or Glossary()).merge(self.learned)
         for conflict in conflicts:
             print(f"[yellow]ℹ glossary conflict — {conflict.describe()}[/yellow]")
-        return self.glossary.to_lines()
+        changed = []
+        for entry in learned.entries:
+            effective = self.glossary.lookup(entry.term)
+            if effective is not None and effective != previous.lookup(entry.term):
+                changed.append(effective)
+        return Glossary(changed).to_lines()
 
     def set_request_extras(self, extra_body=None, extra_headers=None):
         """Fields and headers to add to every request this route makes.

@@ -220,6 +220,9 @@ codex "Hi, please use bbm-plan to translate this book: test_books/animal_farm.ep
   Spend your ChatGPT/Codex plan. Install the
   [Codex CLI](https://developers.openai.com/codex/cli). The default model is `gpt-5.6-luna`; `--api_format codex --model <id>` names another. One session is reused for the whole book and compacted at `--context-compact-at`;
   it runs sandboxed, with shell, MCP servers and browsing off, but hooks may still fire.
+  BBM uses `low` reasoning effort instead of inheriting the interactive Codex
+  setting; override it with `--codex-reasoning-effort <effort>`. Turn latency
+  and sidecar errors are written beside the book as `<book>_codex.log`.
 
   ```shell
   python3 make_book.py --book_name test_books/animal_farm.epub --api_format codex --language zh-hans

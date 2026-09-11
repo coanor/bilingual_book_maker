@@ -136,7 +136,7 @@ def _turn_completed(status="completed", text="译文", error=None):
     return build
 
 
-def _server(handlers=None, notifications_for=None):
+def _server(handlers=None, notifications_for=None, **server_kwargs):
     handlers = {
         "initialize": INIT,
         "config/read": CONFIG,
@@ -145,7 +145,7 @@ def _server(handlers=None, notifications_for=None):
         "turn/start": {"turn": {"id": "tu-1", "status": "inProgress"}},
         **(handlers or {}),
     }
-    server = CodexAppServer()
+    server = CodexAppServer(**server_kwargs)
     # start() spawns twice (discovery, then hardened), so the spawn callable
     # hands out a fresh scripted process per call. `server.fake` follows the
     # live one; `server.spawns` keeps them all for phase assertions. `fake`,
@@ -190,6 +190,22 @@ class TestStartup:
             server.request("account/rateLimits/read")
             ids = [m["id"] for m in server.fake.sent if "id" in m]
             assert ids and len(ids) == len(set(ids))
+        finally:
+            server.close()
+
+    def test_hardened_sidecar_uses_low_reasoning_by_default(self):
+        server = _server()
+        server.start()
+        try:
+            assert 'model_reasoning_effort="low"' in server.spawns[-1].args
+        finally:
+            server.close()
+
+    def test_reasoning_effort_can_be_overridden(self):
+        server = _server(reasoning_effort="medium")
+        server.start()
+        try:
+            assert 'model_reasoning_effort="medium"' in server.spawns[-1].args
         finally:
             server.close()
 
@@ -285,6 +301,36 @@ class TestThreadAndTurn:
             assert server.run_turn("th-1", "The dog barked.") == "译文"
         finally:
             server.close()
+
+    def test_run_turn_writes_wall_time_to_the_diagnostic_log(self, tmp_path):
+        path = tmp_path / "codex.log"
+        server = _server(
+            notifications_for={"turn/start": [_turn_completed()]},
+            diagnostic_path=path,
+        )
+        server.start()
+        try:
+            server.run_turn("th-1", "The dog barked.")
+            log = path.read_text(encoding="utf-8")
+            assert "turn completed" in log
+            assert "input_chars=15" in log
+            assert "elapsed=" in log
+        finally:
+            server.close()
+
+    def test_a_resumed_run_appends_to_the_diagnostic_log(self, tmp_path):
+        path = tmp_path / "codex.log"
+        for _ in range(2):
+            server = _server(
+                notifications_for={"turn/start": [_turn_completed()]},
+                diagnostic_path=path,
+            )
+            server.start()
+            try:
+                server.run_turn("th-1", "text")
+            finally:
+                server.close()
+        assert path.read_text(encoding="utf-8").count("turn completed") == 2
 
     def test_run_turn_passes_an_output_schema(self):
         schema = {"type": "object", "properties": {}}
@@ -438,6 +484,7 @@ class TestHardening:
             assert _config_overrides(server.fake.args) == {
                 "mcp_servers.docs-search.enabled=false",
                 "mcp_servers.node-repl.enabled=false",
+                'model_reasoning_effort="low"',
             }
         finally:
             server.close()

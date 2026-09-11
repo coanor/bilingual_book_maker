@@ -338,11 +338,10 @@ class HandoffReport:
 
     window: int
     summary: str
-    # The renderings this run has established so far, pins included, rendered
-    # canonically. Written to the handoff file and replayed in the seed so the
-    # next window keeps the same names — and so an operator can read back what
-    # the run taught itself. It never reaches the book: the translation metadata stamp
-    # records the `--glossary` file the operator wrote, nothing derived.
+    # Renderings added or changed in this window, rendered canonically. The
+    # accumulated set stays in the translator and matching terms ride with
+    # later units; repeating that whole set here made long handoff histories
+    # grow quadratically.
     glossary_lines: str = ""
     # A style the user fixed via --prompt's `style` field. It is not asked of
     # the model, so it is written in here instead — otherwise the next window

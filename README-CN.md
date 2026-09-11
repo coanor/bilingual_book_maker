@@ -207,6 +207,9 @@ codex "你好，请使用bbm-plan帮我将这本书：test_books/animal_farm.epu
   使用 ChatGPT/Codex 订阅额度。需要安装
   [Codex CLI](https://developers.openai.com/codex/cli) 默认使用`gpt-5.6-luna`，可使用 `--api_format codex --model <id>`指定模型。整本书只开一个 session 并复用，到达 `--context-compact-at` 时压缩；
   运行在沙箱中，shell、MCP 服务器、浏览全部关闭。但hooks可能仍会触发。
+  BBM 默认使用 `low` 推理强度，而不继承交互式 Codex 配置；可用
+  `--codex-reasoning-effort <effort>` 覆盖。每次调用的耗时和 sidecar
+  错误会写到书籍旁的 `<book>_codex.log`。
 
   ```shell
   python3 make_book.py --book_name test_books/animal_farm.epub --api_format codex --language zh-hans

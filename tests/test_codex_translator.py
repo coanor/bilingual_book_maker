@@ -69,6 +69,14 @@ class TestRegistration:
     def test_counts_as_a_model_bearing_format(self):
         assert "codex" in LLM_FORMATS
 
+    def test_a_book_gets_a_persistent_codex_log(self, tmp_path):
+        translator = Codex(
+            key="",
+            language="Chinese",
+            handoff_path=tmp_path / "book_handoff.md",
+        )
+        assert translator.server.diagnostic_path == tmp_path / "book_codex.log"
+
 
 class TestPreflight:
     def test_login_failure_is_raised_not_swallowed(self):

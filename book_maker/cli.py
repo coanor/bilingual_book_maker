@@ -1975,6 +1975,14 @@ off. Minimum 1.
         f"value always wins; minimum 500",
     )
     parser.add_argument(
+        "--codex-reasoning-effort",
+        dest="codex_reasoning_effort",
+        default="low",
+        help="codex format only: reasoning effort used by the translation "
+        "sidecar (default: low). This overrides model_reasoning_effort from "
+        "the user's Codex config for this BBM process only",
+    )
+    parser.add_argument(
         "--no-context-compact",
         dest="no_context_compact",
         action="store_true",
@@ -2502,6 +2510,8 @@ def main():
         parallel_workers=options.parallel_workers,
         **loader_kwargs,
     )
+    if api_format == "codex":
+        e.translate_model.set_reasoning_effort(options.codex_reasoning_effort)
     if options.glossary_path:
         # The translation metadata record embeds the operator's file (never a derived
         # glossary), and the loader only knows about it through this

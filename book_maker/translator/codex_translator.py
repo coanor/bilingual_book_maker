@@ -30,6 +30,7 @@ from ..codex_client import (
     CodexError,
     CodexQuotaExhausted,
     CodexTurnFailed,
+    DEFAULT_REASONING_EFFORT,
 )
 from ..glossary import Glossary
 from ..session_context import (
@@ -191,6 +192,7 @@ class Codex(Base):
         language,
         server=None,
         binary="codex",
+        reasoning_effort=DEFAULT_REASONING_EFFORT,
         context_compact_at=None,
         no_context_compact=False,
         glossary=None,
@@ -204,8 +206,18 @@ class Codex(Base):
         # `key` is accepted and ignored: this format authenticates through
         # codex's stored ChatGPT session.
         super().__init__(key or "", language)
-        self.server = server or CodexAppServer(binary=binary)
+        self.handoff_path = Path(handoff_path) if handoff_path else None
+        diagnostic_path = None
+        if self.handoff_path:
+            book_stem = self.handoff_path.stem.removesuffix("_handoff")
+            diagnostic_path = self.handoff_path.with_name(f"{book_stem}_codex.log")
+        self.server = server or CodexAppServer(
+            binary=binary,
+            reasoning_effort=reasoning_effort,
+            diagnostic_path=diagnostic_path,
+        )
         self._started = server is not None
+        self.reasoning_effort = reasoning_effort
         self.model = DEFAULT_MODEL
         self.model_list = None
         self.context_compact_at = context_compact_at
@@ -217,7 +229,6 @@ class Codex(Base):
         self.learned = Glossary()
         self.glossary = self.pinned
         self.glossary_auto = glossary_auto
-        self.handoff_path = Path(handoff_path) if handoff_path else None
         self.prompt_sys_msg = prompt_sys_msg
         self.prompt_template = prompt_template
         self.style_note = style_note
@@ -262,6 +273,9 @@ class Codex(Base):
     def preflight(self):
         """Confirm a login and say how much of the window is already spent."""
         limits = self._ensure_server().ensure_logged_in()
+        diagnostic_path = getattr(self.server, "diagnostic_path", None)
+        if diagnostic_path and not self.quiet:
+            print(f"[green]Codex diagnostics: {diagnostic_path}[/green]")
         if limits is None:
             return None
         plan = f" ({limits.plan_type} plan)" if limits.plan_type else ""
@@ -282,6 +296,14 @@ class Codex(Base):
                 f"{limits.remaining_percent:g}% of the window remaining[/green]"
             )
         return limits
+
+    def set_reasoning_effort(self, effort):
+        """Set the translation sidecar's effort before preflight starts it."""
+        if self._started:
+            raise CodexError("reasoning effort must be set before Codex starts")
+        self.reasoning_effort = effort
+        if hasattr(self.server, "reasoning_effort"):
+            self.server.reasoning_effort = effort
 
     @staticmethod
     def _reset_phrase(limits):
