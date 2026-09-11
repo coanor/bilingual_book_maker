@@ -535,8 +535,12 @@ class Codex(Base):
         that.
         """
         if not self.prompt_template:
-            return text
-        return self.prompt_template.format(text=text, language=self.language, crlf="\n")
+            content = text
+        else:
+            content = self.prompt_template.format(
+                text=text, language=self.language, crlf="\n"
+            )
+        return self._marker_preamble(text) + content
 
     # ---- translation ------------------------------------------------------
 

@@ -118,6 +118,11 @@ MARKER_CLOSE = "⟧"
 # stray bracket in the prose cannot swallow half a paragraph.
 MARKER_RE = re.compile(r"⟦[^⟦⟧\s]{1,32}⟧")
 
+# Typst keeps source syntax as opaque placeholders while translating the prose
+# around it. These use a different shape from the EPUB DOM markers above, but
+# translators must apply the same preservation contract to both.
+TYPST_MARKER_RE = re.compile(r"@@BBM_TYPST_PROTECT_[0-9]+@@")
+
 _NAME_RE = re.compile(r"[^a-z0-9]+")
 
 

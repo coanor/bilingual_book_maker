@@ -398,10 +398,11 @@ class Base(ABC):
     # Said only to requests that carry markers. A model told to preserve
     # tokens in a text that has none is being taught to invent them.
     MARKER_INSTRUCTION = (
-        "The text contains placeholder tokens written like ⟦code1⟧. Reproduce "
-        "every one of them exactly as written, each in the place the content "
-        "it stands for belongs in your translation. Never translate a token, "
-        "never change its spelling, and never invent one."
+        "The text contains placeholder tokens written like ⟦code1⟧ or "
+        "@@BBM_TYPST_PROTECT_0@@. Reproduce every one of them exactly as "
+        "written, each in the place the content it stands for belongs in your "
+        "translation. Never translate a token, never change its spelling, and "
+        "never invent one."
     )
 
     # Where each `--prompt` section lands on this route:
@@ -501,9 +502,10 @@ class Base(ABC):
     def _carries_markers(text):
         # Imported here: `book_maker.loader` pulls in the loaders, which
         # import this module.
-        from ..loader.markers import MARKER_RE
+        from ..loader.markers import MARKER_RE, TYPST_MARKER_RE
 
-        return bool(MARKER_RE.search(text or ""))
+        source = text or ""
+        return bool(MARKER_RE.search(source) or TYPST_MARKER_RE.search(source))
 
     def _augment_system_content(self, sys_content):
         """The system message plus what is true for the whole run.

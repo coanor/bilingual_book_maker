@@ -110,6 +110,15 @@ class TestTranslation:
         t = _codex(["狗叫了。"])
         assert t.translate("The dog barked.") == "狗叫了。"
 
+    def test_typst_marker_gets_a_preservation_instruction(self):
+        t = _codex(["譯文"])
+
+        t.translate("A @@BBM_TYPST_PROTECT_0@@ paragraph.")
+
+        sent = t.server.turns[0]["text"]
+        assert Codex.MARKER_INSTRUCTION in sent
+        assert "@@BBM_TYPST_PROTECT_0@@" in sent
+
     def test_starts_one_thread_and_reuses_it(self):
         """A fresh thread costs ~17k tokens of preamble; reuse is the point."""
         t = _codex(["一", "二", "三"])
